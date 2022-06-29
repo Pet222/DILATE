@@ -1,6 +1,9 @@
+from cv2 import normalize
 import torch
 from . import soft_dtw
-from . import path_soft_dtw 
+from . import path_soft_dtw
+from ...pytorch_softdtw_cuda import soft_dtw_cuda
+from torch.autograd.functional import hessian
 
 def dilate_loss(outputs, targets, alpha, gamma, device):
 	# outputs, targets: shape (batch_size, N_output, 1)
@@ -19,3 +22,21 @@ def dilate_loss(outputs, targets, alpha, gamma, device):
 	loss_temporal =  torch.sum( path*Omega ) / (N_output*N_output) 
 	loss = alpha*loss_shape+ (1-alpha)*loss_temporal
 	return loss, loss_shape, loss_temporal
+
+
+def dilate_loss_cuda(outputs, targets, alpha, gamma, device):
+	batch_size, N_output = outputs.shape[0:2]
+
+	_soft_dtw_f= soft_dtw_cuda(use_cuda=True, gamma=gamma, normalize=True)
+	loss_shape = _soft_dtw_f(targets, outputs)
+	D = _soft_dtw_f.dist_func(targets, outputs).clone().detach()
+	# outputs, targets: shape (batch_size, N_output, 1)
+
+	path_dtw = path_soft_dtw.PathDTWBatch.apply
+	# torch.autograd.functional.hessian(func, x)
+	path = path_dtw(D,gamma)           
+	Omega =  _soft_dtw_f.dist_func(torch.range(1,N_output).view(N_output,1)).to(device)
+	loss_temporal =  torch.sum( path*Omega ) / (N_output*N_output) 
+	loss = alpha*loss_shape+ (1-alpha)*loss_temporal
+	return loss, loss_shape, loss_temporal
+
